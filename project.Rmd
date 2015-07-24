@@ -1,0 +1,369 @@
+---
+title: "Qualitative Activity Recognition"
+author: "vulpinae"
+date: "July 20, 2015"
+output: html_document
+---
+
+<br/> 
+<br/>
+
+### Executive Summary
+Data collected from on-body and on-device sensors while exercises are conducted are convenient to predict either appropriate or poor performance. The dataset collected by Velloso et al. (2013) is used to train four machine learning models. These models predict if a dumbbell is lifted either appropriately or reproducing 4 types of common mistakes. The Random Forest model outperforms the Linear Discrimant Analysis model, the Naive Bayes model and the Boosting model with respect to accuracy (percentage of right classifications). A Random Forest model can be designed that classifies the movement with out of sample accuracy of 99.88%.  
+ 
+<br/> 
+<br/> 
+
+###Introduction
+Nowadays, quantifying personal activity via smartphones and gadgets has become easy and popular. By contrast to determining how much a certain exercise is performed, the question of how well this is conducted is less often adressed. For this purpose, Velloso et al. (2013) generated the Weight Lifting Exercises Dataset from several sensors measuring movements of participants who were asked to lift a dumbbell either appropriately or reproducing 4 types of common mistakes. Their original paper can be found here: [http://groupware.les.inf.puc-rio.br/work.jsf?p1=11201]
+This current report describes the construction of a prediction model for the purpose of qualitative activity recognition.
+
+<br/> 
+<br/>  
+ 
+###Exploratory analysis
+Six young health participants were asked to perform one set of 10 repetitions of the Unilateral Dumbbell Biceps Curl in five different fashions: exactly according to the specification (Class A), throwing the elbows to the front (Class B), lifting the dumbbell only halfway (Class C), lowering the dumbbell only halfway (Class D) and throwing the hips to the front (Class E).
+
+<br/> 
+
+Class A corresponds to the specified execution of the exercise, while the other 4 classes correspond to common mistakes. Participants were supervised by an experienced weight lifter to make sure the execution complied to the manner they were supposed to simulate. The exercises were performed by six male participants aged between 20-28 years, with little weight lifting experience. Figure 1 shows the distribution of the five exercise activities.
+
+```{r Exploratory0, echo=FALSE, warning=FALSE, message=FALSE}
+
+setwd("~/Coursera/08_Machine_Learning")
+library(caret)
+library(ISLR)
+
+#---------------------------------------------------
+# Verify input file exists.  If not, then get it.  
+#---------------------------------------------------
+sourcefile1 <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+txtfile1    <- "pml-training.csv"
+if(!file.exists(txtfile1)) {download.file(sourcefile1, txtfile1, mode="wb", method="curl")}
+
+sourcefile2 <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+txtfile2    <- "pml-testing.csv"
+if(!file.exists(txtfile2)) {download.file(sourcefile2, txtfile2, mode="wb", method="curl")}
+
+#---------------------------------------------------
+# Read and subset data
+#---------------------------------------------------
+
+training0   <- read.csv(txtfile1)
+testing0   <- read.csv(txtfile2)
+
+# Look at distribution of outcome variable called classe
+barplot(table(training0$classe), col = c("blue","orange","red","green","purple"),ylab="Frequency", 
+        xlab="Exercise Activity", main = "Figure 1: Barbell Activity per Class")
+
+rows<-nrow(training0)
+cols<-ncol(training0)
+
+```
+
+```{r Preparation0, echo=FALSE}
+
+trainFeatures <- training0[,7:159]
+testFeatures <- testing0[,7:159]
+trainFeatures <- suppressWarnings(data.frame(sapply(trainFeatures, as.numeric)))
+testFeatures <- suppressWarnings(data.frame(sapply(testFeatures, as.numeric)))
+trainFeatures[is.na(trainFeatures)] <- 0  ## Change NA's to 0
+testFeatures[is.na(testFeatures)] <- 0  ## Change NA's to 0
+
+#remove near zero variables
+nearZero <- nearZeroVar(trainFeatures)
+nzv<-length(nearZero)
+trainFeatures <- trainFeatures[,-nearZero]
+testFeatures <- testFeatures[,-nearZero]
+
+
+
+## Divide up pmlTraining data into a training and test set for testing our model
+set.seed(1)
+inTrain <- createDataPartition(y=training0$classe, p=.7, list=FALSE)
+training <- trainFeatures[inTrain,]
+testing <- trainFeatures[-inTrain,]
+
+#remove high correlations
+cor <- findCorrelation(cor(training))
+ncor<-length(cor)
+training <- training[,-cor]
+testing <- testing[,-cor]
+finalTest <- testFeatures[, -cor]
+nvar<-ncol(training)
+
+training$classe<-training0[inTrain,160]
+testing$classe<-training0[-inTrain,160]
+
+```
+
+<br/> 
+<br/> 
+
+###Data preparation    
+Looking at the dataset, measures were grouped by sensor position, and that each group of variables shared the same meausures. For each group there are raw measures (i.e. roll, pitch, yaw, x, y, and z measures), and statistical and summary measures (i.e. skewness, kurtosis, etc.). There are `r rows` rows and `r cols` variables in the dataset. The first six variables don't seem to contain useful information for prediction purposes, so these variables are disgarded in the analysis.
+
+<br/> 
+
+The goal of the analysis is to classify the exercise activities based on features collected by the sensor data. This is done by machine learning algorithms, which work on data without missing values. Therefore missing values were replaced by the value 0. Another `r nzv` variables with near zero variation were removed from analysis. Finally `r ncor` variables with high correlation were removed. This leaves `r nvar` variables that can be used to predict the variable 'classe'. Since this is a classification problem, there is no need to center and scale the variables.
+
+<br/> 
+<br/>  
+
+###Analysis
+Four different type of models are considered: Random forest, linear discriminant analysis, naive bayes and boosting (gbm). 
+
+<br/> 
+**Cross validation**<br/> 
+To be able to estimate the out of sample accuracy once the model has been fitted, an independent dataset is splitted prior to any analysis or model generation. Therefore, the original dataset is split into a training (70%) and testing dataset (30%). In order to avoid underestimating the error, 10-fold cross validation repeated 5 times is performed while training the models. For this purpose the  `trainControl(method = "cv")` function will be called as an argument in the `train()` function of each model.
+<br/> 
+<br/> 
+**Model fit results** <br/> 
+
+```{r Analysis0, echo=FALSE, warning=FALSE, message=FALSE}
+rfFit<-readRDS("rfFit.rds")
+ldaFit<-readRDS("ldaFit.rds")
+nbFit<-readRDS("nbFit.rds")
+boFit<-readRDS("boFit.rds")
+
+rfPredictions<-readRDS("rfPredictions.rds")
+ldaPredictions<-readRDS("ldaPredictions.rds")
+nbPredictions<-readRDS("nbPredictions.rds")
+boPredictions<-readRDS("boPredictions.rds")
+
+rfPredictions <- predict(rfFit, testing)
+CM1 <- confusionMatrix(testing$classe, rfPredictions)
+
+ldaPredictions <- predict(ldaFit, testing)
+CM2 <- confusionMatrix(testing$classe, ldaPredictions)
+
+nbPredictions <- predict(nbFit, testing)
+CM3 <- confusionMatrix(testing$classe, nbPredictions)
+
+boPredictions <- predict(boFit, testing)
+CM4 <- confusionMatrix(testing$classe, boPredictions)
+
+# determine accuracy
+acc1<-round(CM1$overall[1]*10000)/10000
+acc2<-round(CM2$overall[1]*10000)/10000
+acc3<-round(CM3$overall[1]*10000)/10000
+acc4<-round(CM4$overall[1]*10000)/10000
+
+
+```
+
+Once the models have been trained on the training dataset, predictions are made for the testing set. Comparing these predictions with the actual values in the testing dataset will give the out of sample error. The four models are judged on accuracy, which is the percentage of correct classifications in all classifications.
+
+| Model  | Accuracy  | | |
+|---|---|---|---|
+|Random Forest | `r acc1 ` | | |
+|Linear Discriminant Analysis   | `r acc2 ` | | |
+|Naive Bayes   |   `r acc3 ` | | |
+|Boosting (gbm)   |  `r acc4 ` |
+
+<br/> 
+
+It is clear that the Random Forest model outperforms the other three models, although boosting also produces very good results.
+The confusion matrix for the Random Forest model is printed below.
+
+<br/> 
+
+```{r ConfusionMatrix0, echo=FALSE, warning=FALSE, message=FALSE }
+CM1
+
+#determine confidence interval for accuracy
+acc1def <- round(CM1$overall[1]*10000)/100
+acc1min <-round(CM1$overall[3]*10000)/100
+acc1max <-round(CM1$overall[4]*10000)/100
+
+```
+<br/> 
+
+With this model, an out of sample accuracy of `r acc1def`% with a 95 % confidence interval of [`r acc1min`%, `r acc1max`%] could be achieved. 
+
+<br/> 
+<br/> 
+
+**Variable importance**<br/> 
+The importance of the variables in the final model is measured by mean decrease in gini. Variables with the highest importance have higher values.
+
+<br/> 
+
+```{r VariableImportance0, echo=FALSE, warning=FALSE, message=FALSE }
+
+# Variable Importance
+varImpPlot(rfFit$finalModel, main="Mean Decrease of Gini per variable") 
+
+``` 
+
+<br/>  
+
+###Conclusion
+Data collected from on-body and on-device sensors while exercises are conducted are convenient to predict either appropriate or poor performance. This analysis has shown that a Random Forest model can be designed that classifies the movement with a considerably high out of sample accuracy. The Random Forest model outperforms the Linear Discrimant Analysis model, the Naive Bayes model and the Boosting model. 
+<br/> 
+<br/>  
+<br/> 
+<br/>  
+
+###Appendix
+<br/> 
+<br/> 
+
+**Creative Commons License**<br/> 
+This work is licensed under the Creative Commons license (CC BY-SA). The CC BY-SA license means you can remix, tweak, and build upon this work even for commercial purposes, as long as you credit the authors of the original work and you license your new creations under the identical terms we are licensing to you. This license is often compared to ???copyleft??? free and open source software licenses. All new works based on this work will carry the same license, so any derivatives will also allow commercial use.
+
+<br/> 
+
+License: https://creativecommons.org/licenses/by-sa/3.0/
+
+<br/> 
+
+Credit: http://groupware.les.inf.puc-rio.br/har#weight_lifting_exercises  
+
+<br/> 
+<br/> 
+
+**Used R code**
+
+<br/> 
+<br/> 
+
+```{r Exploratory, echo=TRUE, eval=FALSE, warning=FALSE, message=FALSE  }
+
+# set working directory and load libraries
+setwd("~/Coursera/08_Machine_Learning")
+library(caret)
+library(ISLR)
+library(ggplot2)
+
+
+#---------------------------------------------------
+# Verify input file exists.  If not, then get it.  
+#---------------------------------------------------
+sourcefile1 <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+txtfile1    <- "pml-training.csv"
+if(!file.exists(txtfile1)) {download.file(sourcefile1, txtfile1, mode="wb", method="curl")}
+
+sourcefile2 <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+txtfile2    <- "pml-testing.csv"
+if(!file.exists(txtfile2)) {download.file(sourcefile2, txtfile2, mode="wb", method="curl")}
+
+#---------------------------------------------------
+# Read and subset data
+#---------------------------------------------------
+
+training0   <- read.csv(txtfile1)
+testing0   <- read.csv(txtfile2)
+
+# Look at distribution of outcome variable called classe
+barplot(table(training0$classe), col = c("blue","orange","red","green","purple"),ylab="Frequency", 
+        xlab="Exercise Activity", main = "Figure 1: Barbell Activity per Class")
+
+rows<-nrow(training0)
+cols<-ncol(training0)
+
+```
+
+
+<br/> 
+<br/>
+
+```{r Preparation, TRUE, eval=FALSE, warning=FALSE, message=FALSE }
+
+#remove first 6 variables
+trainFeatures <- training0[,7:159]
+testFeatures <- testing0[,7:159]
+
+# impute missing values to 0
+trainFeatures <- suppressWarnings(data.frame(sapply(trainFeatures, as.numeric)))
+testFeatures <- suppressWarnings(data.frame(sapply(testFeatures, as.numeric)))
+trainFeatures[is.na(trainFeatures)] <- 0  ## Change NA's to 0
+testFeatures[is.na(testFeatures)] <- 0  ## Change NA's to 0
+
+#remove near zero variance variables
+nearZero <- nearZeroVar(trainFeatures)
+nzv<-length(nearZero)
+trainFeatures <- trainFeatures[,-nearZero]
+testFeatures <- testFeatures[,-nearZero]
+
+
+## Divide up pmlTraining data into a training and test set for testing our model
+set.seed(1)
+inTrain <- createDataPartition(y=training0$classe, p=.7, list=FALSE)
+training <- trainFeatures[inTrain,]
+testing <- trainFeatures[-inTrain,]
+
+#remove high correlated variables
+cor <- findCorrelation(cor(training))
+ncor<-length(cor)
+training <- training[,-cor]
+testing <- testing[,-cor]
+finalTest <- testFeatures[, -cor]
+nvar<-ncol(training)
+
+#define classe variable in training and testset
+training$classe<-training0[inTrain,160]
+testing$classe<-training0[-inTrain,160]
+
+```
+
+<br/> 
+<br/>
+
+```{r Analysis, echo=TRUE, eval=FALSE, warning=FALSE, message=FALSE }
+
+# train 4 models
+set.seed(11)
+rfFit <- train(classe ~ ., method="rf", trControl = ctrl, data=training)
+ldaFit <- train(classe ~ ., method="lda", trControl = ctrl, data=training)
+nbFit <- train(classe ~ ., method="nb", trControl = ctrl, data=training)
+boFit <- train(classe ~ ., method="gbm", trControl = ctrl, data=training, verbose=FALSE)
+
+# make predictions and confusion matrix
+rfPredictions <- predict(rfFit, testing)
+CM1 <- confusionMatrix(testing$classe, rfPredictions)
+
+# make predictions and confusion matrix
+ldaPredictions <- predict(ldaFit, testing)
+CM2 <- confusionMatrix(testing$classe, ldaPredictions)
+
+# make predictions and confusion matrix
+nbPredictions <- predict(nbFit, testing)
+CM3 <- confusionMatrix(testing$classe, nbPredictions)
+
+# make predictions and confusion matrix
+boPredictions <- predict(boFit, testing)
+CM4 <- confusionMatrix(testing$classe, boPredictions)
+
+# determine accuracy
+acc1<-round(CM1$overall[1]*10000)/10000
+acc2<-round(CM2$overall[1]*10000)/10000
+acc3<-round(CM3$overall[1]*10000)/10000
+acc4<-round(CM4$overall[1]*10000)/10000
+
+
+```
+
+<br/> 
+<br/>
+
+```{r ConfusionMatrix, echo=TRUE, eval=FALSE, warning=FALSE, message=FALSE }
+CM1
+
+#determine confidence interval for accuracy
+acc1def <- round(CM1$overall[1]*10000)/100
+acc1min <-round(CM1$overall[3]*10000)/100
+acc1max <-round(CM1$overall[4]*10000)/100
+
+```
+
+<br/> 
+<br/>
+
+```{r VariableImportance, echo=TRUE, eval=FALSE, warning=FALSE, message=FALSE }
+
+# Variable Importance
+varImpPlot(rfFit$finalModel, main="Mean Decrease of Gini per variable") 
+
+``` 
+
